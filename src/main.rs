@@ -460,7 +460,17 @@ async fn mention_all_who_voted_emoji_not_in_voice(ctx: &Context, pch: &PartialCh
 #[tokio::main]
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let token = match env::var("DISCORD_TOKEN")
+    {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Not found a DISCORD_TOKEN in the environment variables, trying the first argument...");
+            match std::env::args().nth(1){
+                Some(a) => a,
+                None => panic!("Not found anything in the first argument, exiting. Have you forgotten to supply the token?"),
+            }
+        },
+    };
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES

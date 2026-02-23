@@ -1,0 +1,14 @@
+[Unit]
+Description=Discord bot pollbot
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=YOUR_USER_HERE
+ExecStart=/YOUR/PATH/HERE
+
+[Install]
+WantedBy=multi-user.target
