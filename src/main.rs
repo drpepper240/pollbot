@@ -62,7 +62,7 @@ impl EventHandler for Handler {
     // reaction add handler
     async fn reaction_add(&self, ctx: Context, reaction: Reaction)
     {
-        match utils::handle_reaction_change(ctx, reaction, ReactionChangeType::ADD).await {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::ADD).await {
             Ok(s) => println!("reaction_add: {}", s),
             Err(e) => println!("reaction_add error: {}", e),
         }
@@ -72,7 +72,7 @@ impl EventHandler for Handler {
     //reaction remove handler
     async fn reaction_remove(&self, ctx: Context, reaction: Reaction)
     {
-        match utils::handle_reaction_change(ctx, reaction, ReactionChangeType::REMOVE).await {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVE).await {
             Ok(s) => println!("reaction_remove: {}", s),
             Err(e) => println!("reaction_remove error: {}", e),
         }
@@ -85,7 +85,7 @@ impl EventHandler for Handler {
 
     async fn reaction_remove_emoji(&self, ctx: Context, reaction: Reaction)
     {
-        match utils::handle_reaction_change(ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
             Ok(s) => println!("reaction_remove_emoji: {}", s),
             Err(e) => println!("reaction_remove_emoji error: {}", e),
         }
@@ -258,7 +258,7 @@ pub async fn create_new_poll(ctx: &Context, channel_id: ChannelId, g_id: &GuildI
 
     let log_message = MessageBuilder::new()
     .mention(u)
-    .push(" created a poll.")
+    .push_safe(format!(" created a poll {}", msg.link()))
     .build();
     match utils::log_to_thread(&ctx, &log_message, g_id, &channel_id, &msg.id.to_string()).await
     {
@@ -464,6 +464,7 @@ async fn main() {
     {
         Ok(s) => s,
         Err(e) => {
+            println!("{e}");
             println!("Not found a DISCORD_TOKEN in the environment variables, trying the first argument...");
             match std::env::args().nth(1){
                 Some(a) => a,

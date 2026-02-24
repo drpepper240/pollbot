@@ -1,3 +1,4 @@
+//use serenity::all::Cache;
 use serenity::all::CacheHttp;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
@@ -18,8 +19,9 @@ use serenity::futures::StreamExt;
 use crate::ReactionChangeType;
 
 
-// Find an active guild thread by its parent_id
-pub async fn find_thread_by_parent_id(ctx: &Context, guild_id: &GuildId, parent_id: &ChannelId) -> Option<ChannelId>
+// Find an active guild thread by its parent_id, will check against the name if given
+pub async fn find_thread_by_parent_id(ctx: &Context, guild_id: &GuildId, parent_id: &ChannelId, thr_name: Option<&String>)
+    -> Option<ChannelId>
 {
     let td = guild_id.get_active_threads(&ctx).await.ok()?;
     println!("Found {} active threads", td.threads.len());
@@ -27,6 +29,9 @@ pub async fn find_thread_by_parent_id(ctx: &Context, guild_id: &GuildId, parent_
         if let Some(tpid) = t.parent_id
         {
             if &tpid == parent_id {
+                if let Some(n) = thr_name {
+                    if t.name != *n {continue;}
+                }
                 println!("Found {}", tpid.to_string());
                 return Some(t.id);
             }
@@ -41,12 +46,13 @@ pub async fn find_thread_by_parent_id(ctx: &Context, guild_id: &GuildId, parent_
 pub async fn log_to_thread(ctx: &Context, log_message: &String, g_id: &GuildId, gch_id: &ChannelId, 
     thread_number: &String) -> Result<String, serenity::Error>
 {
-    let t_id = match find_thread_by_parent_id(&ctx, g_id, &gch_id).await
+    let thr_name = format!("log-{}", thread_number);
+    let t_id = match find_thread_by_parent_id(&ctx, g_id, &gch_id, Some(&thr_name)).await
     {
         Some(t_id) => t_id,
         None => {
             //creating thread
-            let builder = serenity::builder::CreateThread::new(format!("log-{}", thread_number))
+            let builder = serenity::builder::CreateThread::new(thr_name)
             .kind(ChannelType::PrivateThread);
             let thr = gch_id.create_thread(&ctx, builder).await?;
             let thr_msg_text = MessageBuilder::new()
@@ -171,13 +177,18 @@ pub async fn do_we_have_to_listen_to_this_guy(ctx: &Context, command: &CommandIn
 
 
 // makes all the checks and decides whether or not to do anything on reaction add event 
-pub async fn handle_reaction_change(ctx: Context, reaction: Reaction, change: ReactionChangeType) -> Result<String, serenity::Error>{
+pub async fn handle_reaction_change(ctx: &Context, reaction: Reaction, change: ReactionChangeType) -> Result<String, serenity::Error>{
     
     use std::time::Instant;
     let now = Instant::now();
     
     // get message that was reacted to
-    let msg = reaction.message(&ctx).await?;
+    // let msg = match ctx.cache.message(reaction.channel_id, reaction.message_id)
+    // {
+    //     Some(m) => m.clone(), //trying the cache first
+    //     None => reaction.message(&ctx).await?,
+    // };
+    let msg =reaction.message(&ctx).await?;
     let msgidstring = msg.id.to_string();
 
     // ignoring custom reactions
