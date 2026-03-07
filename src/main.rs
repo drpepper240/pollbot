@@ -651,6 +651,8 @@ pub async fn compare_apollo_to_channel_members(
         for m in members_vec{
             // skip bots
             if m.user.id == UserId::from(475744554910351370u64) {continue;} //Apollo bot
+            if m.user.id == UserId::from(235148962103951360u64) {continue;}  //Carl bot
+            if m.user.id == UserId::from(310848622642069504u64) {continue;}  //Juniper bot
             if m.user.id == UserId::from(1470761370944405695u64) {continue;} //Pollbot //TODO get from cache //TODO cache somewhere closer
             members.insert(m.display_name().to_string(), m.clone()); //identical display names can be caught here
         }
