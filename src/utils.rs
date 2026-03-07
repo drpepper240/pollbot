@@ -344,14 +344,14 @@ async fn edit_msg_with_reactions(ctx: &Context, mut msg: Message, g_id: &GuildId
 }
 
 
-// find the last Apollo's message in the channel
-pub async fn find_last_message_apollo(ctx: &Context, ch_id: &ChannelId) -> Option<Message>
+// find the last Apollo's message in the channel with embed
+pub async fn find_last_message_apollo_with_embed(ctx: &Context, ch_id: &ChannelId) -> Option<Message>
 {
     let apollo_id = UserId::from(475744554910351370);
     let mut messages = ch_id.messages_iter(&ctx).boxed();
     while let Some(message_result) = messages.next().await {
         match message_result {
-            Ok(msg) => if msg.author.id == apollo_id {return Some(msg)},
+            Ok(msg) => if msg.author.id == apollo_id && msg.embeds.len() > 0 {return Some(msg)},
             Err(error) => {
                 println!("Error getting last Apollo's message: {}", error);
                 return  None;

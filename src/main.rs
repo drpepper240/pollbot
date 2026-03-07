@@ -710,7 +710,7 @@ pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Opt
     //-> Option<(Vec<String>, Vec<String>, Vec<String>)>
     
 {
-    if let Some(msg) = utils::find_last_message_apollo(ctx, ch_id).await {
+    if let Some(msg) = utils::find_last_message_apollo_with_embed(ctx, ch_id).await {
         fn trim_and_split_names(s: &str) -> Option<Vec<String>>{
             if let Some(s) = s.strip_prefix(">>> "){
                 let mut v: Vec<String>= Vec::new();
@@ -728,7 +728,7 @@ pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Opt
         let mut d_str = String::new();
         let mut t_str = String::new();
         match msg.embeds.get(0) {
-            None => {println!("No embeds found."); return None;},
+            None => {println!("No embeds found. Message content in question:"); println!("{}", msg.content); return None;},
             Some (e) => {
                 for f in e.fields.clone() {
                     if f.name.starts_with(APOLLO_A) { //TODO use APOLLO_OPTIONS tuple instead
