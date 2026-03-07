@@ -13,6 +13,7 @@ use serenity::all::MessageBuilder;
 use serenity::all::PartialChannel;
 use serenity::all::Reaction;
 use serenity::all::ReactionType;
+use serenity::all::User;
 use serenity::all::UserId;
 use serenity::futures::StreamExt;
 
@@ -112,7 +113,8 @@ pub fn get_all_members_in_voice_cached(ctx: &Context,  g_id: &GuildId) -> Option
 }
 
 
-pub fn get_userids_from_channelid_cached(ctx: &Context, ch_id: &ChannelId, g_id: &GuildId) -> Result<Vec<Member>, serenity::Error>
+pub fn get_members_from_channelid_cached(ctx: &Context, ch_id: &ChannelId, g_id: &GuildId)
+    -> Result<Vec<Member>, serenity::Error>
 {
     if let Some(g) = g_id.to_guild_cached(&ctx)
     {
@@ -120,7 +122,7 @@ pub fn get_userids_from_channelid_cached(ctx: &Context, ch_id: &ChannelId, g_id:
         {
             match g_ch.members(&ctx) {
                 Ok(result) => return Ok(result),
-                Err(e) => {println!("get_userids_from_partial_channel_cached error: {e}"); return Err(e)},
+                Err(e) => {println!("get_members_from_channel_cached error: {e}"); return Err(e)},
             }
         } else {
             println!("Can't get guild channel from cache.");
@@ -198,8 +200,8 @@ pub async fn handle_reaction_change(ctx: &Context, reaction: Reaction, change: R
     };
 
     // ignoring other reactions
-    if r_emoji != crate::REACTION_P.to_string()
-        && r_emoji != crate::REACTION_N.to_string()
+    if r_emoji != crate::REACTION_A.to_string()
+        && r_emoji != crate::REACTION_D.to_string()
         && r_emoji != crate::REACTION_T.to_string() {
             return Ok("ignored reaction".to_string())
         }
@@ -245,7 +247,7 @@ pub async fn handle_reaction_change(ctx: &Context, reaction: Reaction, change: R
         ReactionChangeType::ADD => format!("{user_string} reacted with {r_emoji}"),
         ReactionChangeType::REMOVE => format!("{user_string} removed {r_emoji}"),
         ReactionChangeType::REMOVEEMOJI => format!("{user_string} removed emoji {r_emoji}"),
-        _ => format!("{user_string} did something else with {r_emoji}"),        
+        //_ => format!("{user_string} did something else with {r_emoji}"),        
     };
     log_to_thread(&ctx, &log_message, &g_id, &reaction.channel_id, &msgidstring).await?;
     
@@ -311,8 +313,8 @@ async fn edit_msg_with_reactions(ctx: &Context, mut msg: Message, g_id: &GuildId
 
     // concurrency
     let (text_a, text_d, text_t) = tokio::join!(
-        create_text_for_reaction(ctx, &msg, crate::REACTION_P, "Accepted".to_string(), &own_id, g_id, u_id_added, added_reaction),
-        create_text_for_reaction(ctx, &msg, crate::REACTION_N, "Declined".to_string(), &own_id, g_id, u_id_added, added_reaction),
+        create_text_for_reaction(ctx, &msg, crate::REACTION_A, "Accepted".to_string(), &own_id, g_id, u_id_added, added_reaction),
+        create_text_for_reaction(ctx, &msg, crate::REACTION_D, "Declined".to_string(), &own_id, g_id, u_id_added, added_reaction),
         create_text_for_reaction(ctx, &msg, crate::REACTION_T, "Tentative".to_string(), &own_id, g_id, u_id_added, added_reaction),
     );
 
@@ -341,3 +343,20 @@ async fn edit_msg_with_reactions(ctx: &Context, mut msg: Message, g_id: &GuildId
     Ok("ok".to_string())
 }
 
+
+// find the last Apollo's message in the channel
+pub async fn find_last_message_apollo(ctx: &Context, ch_id: &ChannelId) -> Option<Message>
+{
+    let apollo_id = UserId::from(475744554910351370);
+    let mut messages = ch_id.messages_iter(&ctx).boxed();
+    while let Some(message_result) = messages.next().await {
+        match message_result {
+            Ok(msg) => if msg.author.id == apollo_id {return Some(msg)},
+            Err(error) => {
+                println!("Error getting last Apollo's message: {}", error);
+                return  None;
+            }
+        }
+    }
+    return None;
+}

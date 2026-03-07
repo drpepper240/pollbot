@@ -2,16 +2,18 @@ mod commands;
 mod utils;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::vec;
-
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
 use serenity::all::CreateInteractionResponseFollowup;
+use serenity::all::Member;
 use serenity::all::PartialChannel;
 use serenity::all::User;
 use serenity::all::UserId;
 use serenity::all::GuildId;
+use serenity::all::VoiceState;
 use serenity::async_trait;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
@@ -20,12 +22,21 @@ use serenity::utils::MessageBuilder;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
 use serenity::model::application::{Command, Interaction};
 
+use crate::utils::get_members_from_channelid_cached;
+
 
 struct Handler;
 
-static REACTION_P: char = '✅';
-static REACTION_N: char = '❌';
+static REACTION_A: char = '✅';
+static REACTION_D: char = '❌';
 static REACTION_T: char = '❔';
+
+static APOLLO_A: &str = "<:accepted:713124484436983971>";
+static APOLLO_D: &str = "<:declined:713124484688642068>";
+static APOLLO_T: &str = "<:tentative:713214962641666109>";
+
+static APOLLO_OPTIONS: [&str; 3] = [APOLLO_A, APOLLO_D, APOLLO_T];
+static APOLLO_ICONS: [char; 3] = [REACTION_A, REACTION_D, REACTION_T];
 
 enum ReactionChangeType {
     ADD,
@@ -59,37 +70,37 @@ impl EventHandler for Handler {
     //     }
     // }
 
-    // reaction add handler
-    async fn reaction_add(&self, ctx: Context, reaction: Reaction)
-    {
-        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::ADD).await {
-            Ok(s) => println!("reaction_add: {}", s),
-            Err(e) => println!("reaction_add error: {}", e),
-        }
-
-    }
-
-    //reaction remove handler
-    async fn reaction_remove(&self, ctx: Context, reaction: Reaction)
-    {
-        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVE).await {
-            Ok(s) => println!("reaction_remove: {}", s),
-            Err(e) => println!("reaction_remove error: {}", e),
-        }
-    }
-
-    // async fn reaction_remove_all(&self, _ctx: Context, channel_id: ChannelId, removed_from_message_id: MessageId)
+    // // reaction add handler
+    // async fn reaction_add(&self, ctx: Context, reaction: Reaction)
     // {
-    //TODO
+    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::ADD).await {
+    //         Ok(s) => println!("reaction_add: {}", s),
+    //         Err(e) => println!("reaction_add error: {}", e),
+    //     }
+
     // }
 
-    async fn reaction_remove_emoji(&self, ctx: Context, reaction: Reaction)
-    {
-        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
-            Ok(s) => println!("reaction_remove_emoji: {}", s),
-            Err(e) => println!("reaction_remove_emoji error: {}", e),
-        }
-    }
+    // //reaction remove handler
+    // async fn reaction_remove(&self, ctx: Context, reaction: Reaction)
+    // {
+    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVE).await {
+    //         Ok(s) => println!("reaction_remove: {}", s),
+    //         Err(e) => println!("reaction_remove error: {}", e),
+    //     }
+    // }
+
+    // // async fn reaction_remove_all(&self, _ctx: Context, channel_id: ChannelId, removed_from_message_id: MessageId)
+    // // {
+    // //TODO
+    // // }
+
+    // async fn reaction_remove_emoji(&self, ctx: Context, reaction: Reaction)
+    // {
+    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
+    //         Ok(s) => println!("reaction_remove_emoji: {}", s),
+    //         Err(e) => println!("reaction_remove_emoji error: {}", e),
+    //     }
+    // }
 
     // Set a handler to be called on the `ready` event. This is called when a shard is booted, and
     // a READY payload is sent by Discord. This payload contains data like the current user's guild
@@ -100,26 +111,30 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
 
         //registering commands (guild-specific for now)
-        // let guild_id = GuildId::from(330410844854943745);
+        let guild_id = GuildId::from(330410844854943745);
 
-        // let _commands = guild_id
-        //     .set_commands(&ctx, vec![
+        let _commands = guild_id
+            .set_commands(&ctx, vec![
         //         commands::new_poll::register(),
-        //         commands::get_accepted::register(),
-        //         commands::get_tentative::register(),
+                    // commands::apollo_get_accepted::register(),
+    //         commands::apollo_get_tentative::register(),
         //         commands::get_not_voted::register(),
         //         commands::get_not_in_voice::register(),
-        //     ])
-        //     .await;
+            ])
+            .await;
         
         //println!("I now have the following guild slash commands: {commands:#?}");
 
         let g_commands = Command::set_global_commands(&ctx, vec![
-                commands::new_poll::register(),
-                commands::get_accepted::register(),
-                commands::get_tentative::register(),
-                commands::get_no_vote::register(),
-                commands::get_not_in_voice::register(),
+                // commands::new_poll::register(),
+                // commands::get_accepted::register(),
+                // commands::get_tentative::register(),
+                // commands::get_no_vote::register(),
+                // commands::get_not_in_voice::register(),
+                commands::apollo_get_accepted::register(),
+                commands::apollo_get_tentative::register(),
+                commands::apollo_get_no_vote::register(),
+                commands::apollo_get_not_in_voice::register(),
             ])
             .await;
         println!("I now have the following global slash commands: {g_commands:#?}");
@@ -151,61 +166,61 @@ impl EventHandler for Handler {
             let mut response_str = "Default response".to_string();
             let mut response_eph = true;
 
-            let g_id = match cmd.guild_id
+            if let Some(g_id)= cmd.guild_id
             {
-                Some(g_id) => g_id,
-                None => {println!("No guild in the message"); return},
-            };
-
-            match cmd.data.name.as_str() {
-                "new_poll" => {
-                    response_str = match create_new_poll(&ctx, cmd.channel_id, &g_id, &cmd.user).await {
-                        Ok(s) => format!("{}", s),
-                        Err(e) => format!("'/new_poll' error: {}", e),
-                    };
-                },
-                "get_not_voted" => {
-                    if let Some(ch) = &cmd.channel {
-                        if let Some(g_id) = &cmd.guild_id {
-                            match mention_all_who_not_voted(&ctx, ch, g_id, &cmd.user).await {
-                                Ok(s) => {response_str = s; response_eph = true},
-                                Err(e) => {response_str = e.to_string(); response_eph = true},
-                            }
-                        }
-                    };                  
-                },
-                "get_tentative" => {
-                    if let Some(ch) = &cmd.channel {
-                        if let Some(g_id) = &cmd.guild_id {
-                            match mention_all_who_voted_emoji(&ctx, ch, g_id, REACTION_T, &cmd.user).await {
-                                Ok(s) => {response_str = s; response_eph = true},
-                                Err(e) => {response_str = e.to_string(); response_eph = true},
-                            }
-                        }
-                    };                  
-                },
-                "get_accepted" => {
-                    if let Some(ch) = &cmd.channel {
-                        if let Some(g_id) = &cmd.guild_id {
-                            match mention_all_who_voted_emoji(&ctx, ch, g_id, REACTION_P, &cmd.user).await {
-                                Ok(s) => {response_str = s; response_eph = true},
-                                Err(e) => {response_str = e.to_string(); response_eph = true},
-                            }
-                        }
-                    };                  
-                },
-                "get_not_in_voice" => {
-                    if let Some(ch) = &cmd.channel {
-                        if let Some(g_id) = &cmd.guild_id {
-                            match mention_all_who_voted_emoji_not_in_voice(&ctx, ch, g_id, REACTION_P, &cmd.user).await {
-                                Ok(s) => {response_str = s; response_eph = true},
-                                Err(e) => {response_str = e.to_string(); response_eph = true},
-                            }
-                        }
-                    };
-                },
-                _ => response_str = "Not implemented :(".to_string(),
-            };        
+                if let Some(ref ch) = cmd.channel
+                    {
+                        match cmd.data.name.as_str() {
+                            "new_poll" => {
+                                response_str = match create_new_poll(&ctx, cmd.channel_id, &g_id, &cmd.user).await {
+                                    Ok(s) => format!("{}", s),
+                                    Err(e) => format!("'/new_poll' error: {}", e),
+                                };
+                            },
+                            "get_not_voted" => {
+                                match mention_all_who_not_voted(&ctx, &ch, &g_id, &cmd.user).await {
+                                    Ok(s) => {response_str = s; response_eph = true},
+                                    Err(e) => {response_str = e.to_string(); response_eph = true},
+                                }
+                            },
+                            "get_tentative" => {
+                                match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_T, &cmd.user).await {
+                                    Ok(s) => {response_str = s; response_eph = true},
+                                    Err(e) => {response_str = e.to_string(); response_eph = true},
+                                }
+                            },
+                            "get_accepted" => {
+                                match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
+                                    Ok(s) => {response_str = s; response_eph = true},
+                                    Err(e) => {response_str = e.to_string(); response_eph = true},
+                                }
+                            },
+                            "get_not_in_voice" => {
+                                match mention_all_who_voted_emoji_not_in_voice(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
+                                    Ok(s) => {response_str = s; response_eph = true},
+                                    Err(e) => {response_str = e.to_string(); response_eph = true},
+                                }
+                            },
+                            "apollo_get_accepted" => {
+                                response_str = compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, compare_voted_to_members_internal, 0).await;
+                            },
+                            "apollo_get_tentative" => {
+                                response_str = compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, compare_voted_to_members_internal, 2).await;
+                            },
+                            "apollo_get_no_vote" => {
+                                response_str = compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, compare_non_vote_to_members_internal, 0).await;
+                            },
+                            "apollo_get_not_in_voice" => {
+                                response_str = compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, compare_voted_to_in_voice_internal, 0).await;
+                            },
+                            _ => response_str = "Not implemented :(".to_string(),
+                        };
+                    } else {
+                        response_str = "Can't get channel from the command. Are you running this command in a server?".to_string();
+                    }
+            } else {
+                response_str = "Can't get guild_id. Are you running this command in a server?".to_string();
+            }
 
             let followup_msg = CreateInteractionResponseFollowup::new()
             .content(response_str)
@@ -213,7 +228,6 @@ impl EventHandler for Handler {
             if let Err(why) = cmd.create_followup(&ctx.http, followup_msg).await {
                 println!("Cannot respond to slash command: {why}");
             }
-
         }
     }
 }
@@ -267,8 +281,8 @@ pub async fn create_new_poll(ctx: &Context, channel_id: ChannelId, g_id: &GuildI
     }
     
     //adding initial reactions sequentially
-    msg.react(&ctx, crate::REACTION_P).await?;
-    msg.react(&ctx, crate::REACTION_N).await?;
+    msg.react(&ctx, crate::REACTION_A).await?;
+    msg.react(&ctx, crate::REACTION_D).await?;
     msg.react(&ctx, crate::REACTION_T).await?;
     Ok("Successfully created a poll.".to_string())
 }
@@ -325,12 +339,12 @@ async fn mention_all_who_not_voted(ctx: &Context, pch: &PartialChannel, g_id: &G
     {
         if let Some(msg) = utils::find_last_own_message(ctx, ch_id).await
         {
-            if let Ok(ch_members) = utils::get_userids_from_channelid_cached(&ctx, &ch_id, g_id)
+            if let Ok(ch_members) = utils::get_members_from_channelid_cached(&ctx, &ch_id, g_id)
             {
                 let own_id = ctx.cache.current_user().id;
                 let (reacted_p, reacted_n, reacted_t) = tokio::join!(
-                msg.reaction_users(&ctx, REACTION_P, Some(100u8), None),
-                msg.reaction_users(&ctx, REACTION_N, Some(100u8), None),
+                msg.reaction_users(&ctx, REACTION_A, Some(100u8), None),
+                msg.reaction_users(&ctx, REACTION_D, Some(100u8), None),
                 msg.reaction_users(&ctx, REACTION_T, Some(100u8), None),
                 );
                 let mut reacted: Vec<User>= vec![];
@@ -496,3 +510,247 @@ async fn main() {
         println!("Client error: {why:?}");
     }
 }
+
+
+// a function to pass to compare_apollo_to_channel_members
+// returns a formatted message listing every member who selected the specific poll option in Apollo's poll (both names and mention-ready code),
+// with an additional list of names who selected the option but weren't found among the members
+fn compare_voted_to_members_internal(
+    poll_results: [Vec<String>; 3], //poll results for all three opts
+    members: HashMap<String, Member>, //members from the channel
+    a_i: usize, //apollo option index we want
+    _possibly_in_voice: Option<HashMap<UserId, VoiceState>>) 
+    -> String   //message that can be shown to the command user
+{
+    let mut voted_but_not_in_channel = String::from("");
+    let mut voted_names = String::from("");
+    let mut voted_mentions = String::from("");
+    for voted_n in poll_results[a_i].clone() {
+        if let Some(m) = members.get(voted_n.as_str()){
+            voted_names += MessageBuilder::new()
+            .push_line_safe(format!("{} ({})", m.user.name, m.display_name()))
+            .build().as_str();
+            voted_mentions += MessageBuilder::new()
+            .mention(m)
+            .build().as_str();
+        } else {
+            voted_but_not_in_channel += voted_n.as_str();
+        }
+    }
+    if voted_but_not_in_channel.len() > 0 {
+        voted_but_not_in_channel = format!("Unable to find these members. Could they have changed their display name?\n{}", 
+            voted_but_not_in_channel);
+    }
+    if voted_names.len() > 0 {voted_names = format!("These members selected {}:\n", APOLLO_ICONS[a_i]) + voted_names.as_str();}
+    if voted_mentions.len() > 0 {voted_mentions = format!("```{}```", voted_mentions.as_str());}
+    else {return format!("Nobody selected {}.", APOLLO_ICONS[a_i])}
+    return format!("{voted_names}{voted_mentions}{voted_but_not_in_channel}");
+}
+
+
+// a function to pass to compare_apollo_to_channel_members
+// returns a formatted message listing every member not found among the voters of the Apollo's poll (both names and mention-ready code),
+fn compare_non_vote_to_members_internal(
+    poll_results: [Vec<String>; 3], //poll results for all three opts
+    members: HashMap<String, Member>, //members from the channel
+    _a_i: usize, //apollo option index we want
+    _possibly_in_voice: Option<HashMap<UserId, VoiceState>>) 
+    -> String   //message that can be shown to the command user
+{
+    let mut no_vote_names = String::from("");
+    let mut no_vote_mentions = String::from("");
+    let mut voters: HashSet<String> = HashSet::new();
+    let mut nv_cnt = 0;
+
+    for i in poll_results{
+        for r in i {
+            voters.insert(r); //TODO find a better way to do this
+        }
+    }
+    
+    for m in &members{
+        if !voters.contains(m.0){
+            no_vote_names += MessageBuilder::new()
+            .push_line_safe(format!("{} ({})", m.1.user.name, m.1.display_name()))
+            .build().as_str();
+            no_vote_mentions += MessageBuilder::new()
+            .mention(m.1)
+            .build().as_str();
+            nv_cnt +=1;
+        }
+    }
+    if no_vote_names.len() > 0 {
+        no_vote_names = format!("These members forgot to participate in the poll ({}/{}):\n", nv_cnt, members.len()) + no_vote_names.as_str();
+    }
+    if no_vote_mentions.len() > 0 {no_vote_mentions = format!("```{}```", no_vote_mentions.as_str());}
+    else {return format!("Everyone's participated 👌")}
+    return format!("{no_vote_names}{no_vote_mentions}");
+}
+
+
+// a function to pass to compare_apollo_to_channel_members
+// returns a formatted message listing every member who selected the specific poll option in Apollo's poll (both names and mention-ready code),
+// but was not found in the voice channels of the guild
+// with an additional list of names who selected the option but weren't found among the members
+fn compare_voted_to_in_voice_internal(
+    poll_results: [Vec<String>; 3], //poll results for all three opts
+    members: HashMap<String, Member>, //members from the channel
+    a_i: usize, //apollo option index we want
+    possibly_in_voice: Option<HashMap<UserId, VoiceState>>) 
+    -> String   //message that can be shown to the command user
+{
+    let mut voted_but_not_in_channel = String::from("");
+    let mut niv_names = String::from("");
+    let mut niv_mentions = String::from("");
+    let mut v_cnt = 0;
+    let mut niv_cnt = 0;
+    for voted_n in poll_results[a_i].clone() {
+        if let Some(m) = members.get(voted_n.as_str()){
+           if let Some(in_voice) = &possibly_in_voice {
+                if !in_voice.contains_key(&m.user.id) {
+                    niv_names += MessageBuilder::new()
+                    .push_line_safe(format!("{} ({})", m.user.name, m.display_name()))
+                    .build().as_str();
+                    niv_mentions += MessageBuilder::new()
+                    .mention(m)
+                    .build().as_str();   
+                    niv_cnt +=1;
+                }
+            } // else nobody in voice
+           v_cnt +=1;
+        } else {
+            voted_but_not_in_channel += voted_n.as_str();
+        }
+    }
+    if voted_but_not_in_channel.len() > 0 {
+        voted_but_not_in_channel = format!("Unable to find these members. Could they have changed their display name?\n{}", 
+            voted_but_not_in_channel);
+    }
+    if niv_names.len() > 0 {
+        niv_names = format!("These members selected {}, but were not found in voice channels ({}/{}):\n", APOLLO_ICONS[a_i], niv_cnt, v_cnt) 
+            + niv_names.as_str();
+        }
+    if niv_mentions.len() > 0 {niv_mentions = format!("```{}```", niv_mentions.as_str());}
+    return format!("{niv_names}{niv_mentions}{voted_but_not_in_channel}");
+}
+
+
+// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
+pub async fn compare_apollo_to_channel_members(
+    ctx: &Context, 
+    ch_id: &ChannelId, 
+    g_id: &GuildId, 
+    internal_fn: fn([Vec<String>; 3], HashMap<String, Member>, usize, Option<HashMap<UserId, VoiceState>>) -> String,
+    apollo_option_index: usize) -> String
+{
+    // get list of channel members
+    if let Ok (members_vec) = get_members_from_channelid_cached(ctx, ch_id, g_id)
+    {
+        // UserId to DisplayName for each member of the channel
+        let mut members: HashMap<String, Member> = HashMap::new();
+        for m in members_vec{
+            // skip bots
+            if m.user.id == UserId::from(475744554910351370u64) {continue;} //Apollo bot
+            if m.user.id == UserId::from(1470761370944405695u64) {continue;} //Pollbot //TODO get from cache //TODO cache somewhere closer
+            members.insert(m.display_name().to_string(), m.clone()); //identical display names can be caught here
+        }
+        //get users in voice
+        let possibly_in_voice = utils::get_all_members_in_voice_cached(ctx, g_id);
+        // get list of people from the poll
+        if let Some(poll_results) = get_and_parse_apollo_poll(&ctx, ch_id).await {
+            // compare
+            internal_fn(poll_results, members, apollo_option_index, possibly_in_voice) //TODO check index validity here
+        } else {
+            //TODO signal error
+            return "Unable to find the poll.".to_string();
+        }
+    } else {
+        //TODO signal error
+        return "Unable to get members from the current channel.".to_string();
+    }
+}
+
+
+// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
+// lists everyone who voted but was not found among the members of the channel
+pub fn mention_all_who_voted_emoji_apollo()
+{
+
+}
+
+
+// returns a message listing everyone from the channel who did not vote in Apollo's poll (both names and mention-ready code),
+// lists everyone who voted but was not found among the members of the channel
+pub fn mention_all_who_not_voted_apollo()
+{
+    // get list of people from the poll
+    // get list of channel members
+    // compare
+}
+
+
+// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
+// but is not present in any of the voice channels
+// lists everyone who voted but was not found among the members of the channel
+pub fn mention_all_who_voted_emoji_not_in_voice_apollo()
+{
+    // get list of people from the poll
+    // get list of channel members
+    // compare
+    // get list of people in voice
+    // compare
+}
+
+
+// Finds and parses the last Apollo's poll, tries to extract the lists of names for "accepted", "declined" and "tentative"
+// options. Some vecs can be empty. Returns None on failure.
+pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Option<[Vec<String>; 3]>
+    //-> Option<(Vec<String>, Vec<String>, Vec<String>)>
+    
+{
+    if let Some(msg) = utils::find_last_message_apollo(ctx, ch_id).await {
+        fn trim_and_split_names(s: &str) -> Option<Vec<String>>{
+            if let Some(s) = s.strip_prefix(">>> "){
+                let mut v: Vec<String>= Vec::new();
+                let s = s.replace("\\\\", "\\"); //the string received from the JSON embed appears to be double-serialized for some reason
+                let mut l_iter = s.lines();
+                while let Some(l) = l_iter.next() {
+                    v.push(l.to_string());
+                }
+                if !v.is_empty() {return Some(v)};
+            }
+            return None;
+        }
+
+        let mut a_str = String::new();
+        let mut d_str = String::new();
+        let mut t_str = String::new();
+        match msg.embeds.get(0) {
+            None => {println!("No embeds found."); return None;},
+            Some (e) => {
+                for f in e.fields.clone() {
+                    if f.name.starts_with(APOLLO_A) { //TODO use APOLLO_OPTIONS tuple instead
+                        a_str = f.value;
+                    } else if f.name.starts_with(APOLLO_D) {
+                        d_str = f.value;
+                    } else if f.name.starts_with(APOLLO_T) {
+                        t_str = f.value;
+                    }
+                }
+            },
+        };
+       
+        let mut v_a: Vec<String>= Vec::new();
+        let mut v_d: Vec<String>= Vec::new();
+        let mut v_t: Vec<String>= Vec::new();
+        if let Some(a) = trim_and_split_names(&a_str) {v_a = a;}
+        if let Some(d) = trim_and_split_names(&d_str) {v_d = d;}
+        if let Some(t) = trim_and_split_names(&t_str) {v_t = t;}
+        // return Some((v_a, v_d, v_t));
+        return Some([v_a, v_d, v_t]);
+    } else {
+        println!("Apollo's message was not found!");
+    }
+    return None;
+}
+
