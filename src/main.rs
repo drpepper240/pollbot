@@ -17,6 +17,7 @@ use serenity::all::VoiceState;
 use serenity::async_trait;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
+#[cfg(feature = "poll_creation")]
 use serenity::model::channel::Reaction;
 use serenity::utils::MessageBuilder;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
@@ -37,9 +38,10 @@ static APOLLO_T: &str = "<:tentative:713214962641666109>";
 
 static MSG_LEN_LIMIT: usize = 1996;
 
-static APOLLO_OPTIONS: [&str; 3] = [APOLLO_A, APOLLO_D, APOLLO_T];
+static _APOLLO_OPTIONS: [&str; 3] = [APOLLO_A, APOLLO_D, APOLLO_T];
 static APOLLO_ICONS: [char; 3] = [REACTION_A, REACTION_D, REACTION_T];
 
+#[cfg(feature = "poll_creation")]
 enum ReactionChangeType {
     ADD,
     REMOVE,
@@ -72,37 +74,40 @@ impl EventHandler for Handler {
     //     }
     // }
 
-    // // reaction add handler
-    // async fn reaction_add(&self, ctx: Context, reaction: Reaction)
-    // {
-    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::ADD).await {
-    //         Ok(s) => println!("reaction_add: {}", s),
-    //         Err(e) => println!("reaction_add error: {}", e),
-    //     }
+    // reaction add handler
+    #[cfg(feature = "poll_creation")]
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction)
+    {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::ADD).await {
+            Ok(s) => println!("reaction_add: {}", s),
+            Err(e) => println!("reaction_add error: {}", e),
+        }
 
-    // }
+    }
 
-    // //reaction remove handler
-    // async fn reaction_remove(&self, ctx: Context, reaction: Reaction)
-    // {
-    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVE).await {
-    //         Ok(s) => println!("reaction_remove: {}", s),
-    //         Err(e) => println!("reaction_remove error: {}", e),
-    //     }
-    // }
+    //reaction remove handler
+    #[cfg(feature = "poll_creation")]
+    async fn reaction_remove(&self, ctx: Context, reaction: Reaction)
+    {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVE).await {
+            Ok(s) => println!("reaction_remove: {}", s),
+            Err(e) => println!("reaction_remove error: {}", e),
+        }
+    }
 
     // // async fn reaction_remove_all(&self, _ctx: Context, channel_id: ChannelId, removed_from_message_id: MessageId)
     // // {
     // //TODO
     // // }
 
-    // async fn reaction_remove_emoji(&self, ctx: Context, reaction: Reaction)
-    // {
-    //     match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
-    //         Ok(s) => println!("reaction_remove_emoji: {}", s),
-    //         Err(e) => println!("reaction_remove_emoji error: {}", e),
-    //     }
-    // }
+    #[cfg(feature = "poll_creation")]
+    async fn reaction_remove_emoji(&self, ctx: Context, reaction: Reaction)
+    {
+        match utils::handle_reaction_change(&ctx, reaction, ReactionChangeType::REMOVEEMOJI).await {
+            Ok(s) => println!("reaction_remove_emoji: {}", s),
+            Err(e) => println!("reaction_remove_emoji error: {}", e),
+        }
+    }
 
     // Set a handler to be called on the `ready` event. This is called when a shard is booted, and
     // a READY payload is sent by Discord. This payload contains data like the current user's guild
@@ -126,19 +131,20 @@ impl EventHandler for Handler {
             .await;
         
         //println!("I now have the following guild slash commands: {commands:#?}");
-
-        let g_commands = Command::set_global_commands(&ctx, vec![
-                // commands::new_poll::register(),
-                // commands::get_accepted::register(),
-                // commands::get_tentative::register(),
-                // commands::get_no_vote::register(),
-                // commands::get_not_in_voice::register(),
-                commands::apollo_get_accepted::register(),
+            
+        let mut gcv =  vec![commands::apollo_get_accepted::register(),
                 commands::apollo_get_tentative::register(),
                 commands::apollo_get_no_vote::register(),
-                commands::apollo_get_not_in_voice::register(),
-            ])
-            .await;
+                commands::apollo_get_not_in_voice::register(),];
+        if cfg!(feature="poll_creation") {
+            gcv.extend_from_slice(&[commands::new_poll::register(),
+                commands::get_accepted::register(),
+                commands::get_tentative::register(),
+                commands::get_no_vote::register(),
+                commands::get_not_in_voice::register(), ]);
+        }
+
+        let g_commands = Command::set_global_commands(&ctx, gcv).await;
         println!("I now have the following global slash commands: {g_commands:#?}");
     }
 
@@ -165,7 +171,7 @@ impl EventHandler for Handler {
                 println!("Cannot respond to slash command: {why}");
             }
 
-            let mut response_str = "Default response".to_string();
+            let response_str: String;
             let mut response_eph = true;
 
             if let Some(g_id)= cmd.guild_id
@@ -250,28 +256,12 @@ pub async fn create_new_poll(ctx: &Context, channel_id: ChannelId, g_id: &GuildI
         },
     }; 
 
-    //checking if we're in a proper channel
-    // let ch = channel_id.to_channel(&ctx).await?; //TODO do this with cache as in 
-    // let g_ch = match ch.guild() {
-    //     Some(guild_channel) => guild_channel,
-    //     None => return Ok("Tried to create a poll not in a guild channel. Aborted.".to_string()),
-    // };
     if g_ch.kind != ChannelType::Text {
         return Ok("Tried to create a poll in a channel which is not a text channel. Aborted.".to_string());
     }
     
     //creating message
     let msg = channel_id.say(&ctx.http, "Creating new poll...").await?;
-
-    //creating thread
-    // let builder = serenity::builder::CreateThread::new(format!("log-{}", msg.id.to_string()))
-    // .kind(ChannelType::PrivateThread);
-    // let thr_id = channel_id.create_thread(&ctx, builder).await?;
-    // let thr_msg_text = MessageBuilder::new()
-    // .mention(&u)
-    // .push(" created a poll.")
-    // .build();
-    // thr_id.say(&ctx.http, thr_msg_text).await?;
 
     let log_message = MessageBuilder::new()
     .mention(u)
@@ -666,7 +656,8 @@ fn compare_voted_to_in_voice_internal(
 }
 
 
-// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
+// prepares everything to run the supplied function which compares poll results to current channel members or members active in voice channels
+// returns the string to be used as a reply from the bot
 pub async fn compare_apollo_to_channel_members(
     ctx: &Context, 
     ch_id: &ChannelId, 
@@ -704,42 +695,9 @@ pub async fn compare_apollo_to_channel_members(
 }
 
 
-// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
-// lists everyone who voted but was not found among the members of the channel
-pub fn mention_all_who_voted_emoji_apollo()
-{
-
-}
-
-
-// returns a message listing everyone from the channel who did not vote in Apollo's poll (both names and mention-ready code),
-// lists everyone who voted but was not found among the members of the channel
-pub fn mention_all_who_not_voted_apollo()
-{
-    // get list of people from the poll
-    // get list of channel members
-    // compare
-}
-
-
-// returns a message listing everyone who voted certain poll variant in Apollo's poll (both names and mention-ready code),
-// but is not present in any of the voice channels
-// lists everyone who voted but was not found among the members of the channel
-pub fn mention_all_who_voted_emoji_not_in_voice_apollo()
-{
-    // get list of people from the poll
-    // get list of channel members
-    // compare
-    // get list of people in voice
-    // compare
-}
-
-
 // Finds and parses the last Apollo's poll, tries to extract the lists of names for "accepted", "declined" and "tentative"
 // options. Some vecs can be empty. Returns None on failure.
 pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Option<[Vec<String>; 3]>
-    //-> Option<(Vec<String>, Vec<String>, Vec<String>)>
-    
 {
     if let Some(msg) = utils::find_last_message_apollo_with_embed(ctx, ch_id).await {
         fn trim_and_split_names(s: &str) -> Option<Vec<String>>{

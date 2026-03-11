@@ -1,23 +1,22 @@
-//use serenity::all::Cache;
 use serenity::all::CacheHttp;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
 use serenity::all::CommandInteraction;
 use serenity::all::Context;
-use serenity::all::EditMessage;
 use serenity::all::GuildId;
 use serenity::all::Member;
-use serenity::all::Mentionable;
 use serenity::all::Message;
 use serenity::all::MessageBuilder;
 use serenity::all::PartialChannel;
-use serenity::all::Reaction;
-use serenity::all::ReactionType;
-use serenity::all::User;
 use serenity::all::UserId;
 use serenity::futures::StreamExt;
-
-use crate::ReactionChangeType;
+#[cfg(feature = "poll_creation")]
+use {crate::ReactionChangeType, 
+    serenity::all::EditMessage,
+    serenity::all::Reaction,
+    serenity::all::ReactionType,
+    serenity::all::Mentionable,
+};
 
 
 // Find an active guild thread by its parent_id, will check against the name if given
@@ -179,6 +178,7 @@ pub async fn do_we_have_to_listen_to_this_guy(ctx: &Context, command: &CommandIn
 
 
 // makes all the checks and decides whether or not to do anything on reaction add event 
+#[cfg(feature = "poll_creation")]
 pub async fn handle_reaction_change(ctx: &Context, reaction: Reaction, change: ReactionChangeType) -> Result<String, serenity::Error>{
     
     use std::time::Instant;
@@ -261,6 +261,7 @@ pub async fn handle_reaction_change(ctx: &Context, reaction: Reaction, change: R
 // replaces the contents of the message with lists of users who reacted to this message with predefined reactions
 // if supplied with both UserId and the reaction they added, removes the user from other reaction lists 
 // and removes corresponding emoji reactions from the message
+#[cfg(feature = "poll_creation")]
 async fn edit_msg_with_reactions(ctx: &Context, mut msg: Message, g_id: &GuildId, u_id_added: Option<UserId>, 
     added_reaction: Option<char>) -> Result<String, serenity::Error> {
     
