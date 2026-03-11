@@ -35,6 +35,8 @@ static APOLLO_A: &str = "<:accepted:713124484436983971>";
 static APOLLO_D: &str = "<:declined:713124484688642068>";
 static APOLLO_T: &str = "<:tentative:713214962641666109>";
 
+static MSG_LEN_LIMIT: usize = 1996;
+
 static APOLLO_OPTIONS: [&str; 3] = [APOLLO_A, APOLLO_D, APOLLO_T];
 static APOLLO_ICONS: [char; 3] = [REACTION_A, REACTION_D, REACTION_T];
 
@@ -223,10 +225,11 @@ impl EventHandler for Handler {
             }
 
             let followup_msg = CreateInteractionResponseFollowup::new()
-            .content(response_str)
+            .content(&response_str)
             .ephemeral(response_eph);
             if let Err(why) = cmd.create_followup(&ctx.http, followup_msg).await {
                 println!("Cannot respond to slash command: {why}");
+                println!("response_str.len()={}", response_str.len());
             }
         }
     }
@@ -449,7 +452,7 @@ async fn mention_all_who_voted_emoji_not_in_voice(ctx: &Context, pch: &PartialCh
             .mention(u)
             .push_line_safe(format!(" requested the list of all members who voted \"{react}\" but are not in voice ({cnt_not_in_v}/{cnt}):"))
             .push_line(match mentions.len() {0 => "".to_string(), _ => format!("{names}```{mentions}```"),})
-            .push_line(format!("Present in voice channels right now ({cnt_in_v}/{cnt}):"))
+            .push_line(format!("Present in the voice channels right now ({cnt_in_v}/{cnt}):"))
             .push_line(names_in_v)
             .build();
             utils::log_to_thread(&ctx, &log_message, g_id, &ch_id, &msg.id.to_string()).await?;
@@ -523,6 +526,7 @@ fn compare_voted_to_members_internal(
     -> String   //message that can be shown to the command user
 {
     let mut voted_but_not_in_channel = String::from("");
+    let mut voted_but_not_in_channel_descr: String = String::from("");
     let mut voted_names = String::from("");
     let mut voted_mentions = String::from("");
     for voted_n in poll_results[a_i].clone() {
@@ -537,14 +541,21 @@ fn compare_voted_to_members_internal(
             voted_but_not_in_channel += voted_n.as_str();
         }
     }
+
+    if voted_mentions.len() == 0 {return format!("Nobody selected {}.", APOLLO_ICONS[a_i])}
     if voted_but_not_in_channel.len() > 0 {
-        voted_but_not_in_channel = format!("Unable to find these members. Could they have changed their display name?\n{}", 
-            voted_but_not_in_channel);
+        voted_but_not_in_channel_descr = format!("Unable to find these members. Could they have changed their display name?\n");
     }
-    if voted_names.len() > 0 {voted_names = format!("These members selected {}:\n", APOLLO_ICONS[a_i]) + voted_names.as_str();}
-    if voted_mentions.len() > 0 {voted_mentions = format!("```{}```", voted_mentions.as_str());}
-    else {return format!("Nobody selected {}.", APOLLO_ICONS[a_i])}
-    return format!("{voted_names}{voted_mentions}{voted_but_not_in_channel}");
+
+    return utils::truncate_response_message([
+        format!("These members selected {}:\n", APOLLO_ICONS[a_i]),
+        voted_names,
+        "```".to_string(),
+        voted_mentions,
+        "```".to_string(),
+        voted_but_not_in_channel_descr.to_string(),
+        voted_but_not_in_channel,
+    ], MSG_LEN_LIMIT);
 }
 
 
@@ -579,12 +590,16 @@ fn compare_non_vote_to_members_internal(
             nv_cnt +=1;
         }
     }
-    if no_vote_names.len() > 0 {
-        no_vote_names = format!("These members forgot to participate in the poll ({}/{}):\n", nv_cnt, members.len()) + no_vote_names.as_str();
-    }
-    if no_vote_mentions.len() > 0 {no_vote_mentions = format!("```{}```", no_vote_mentions.as_str());}
-    else {return format!("Everyone's participated 👌")}
-    return format!("{no_vote_names}{no_vote_mentions}");
+    if no_vote_mentions.len() == 0 {return format!("Everyone's participated 👌")}
+    return utils::truncate_response_message([
+        format!("These members forgot to participate in the poll ({}/{}):\n", nv_cnt, members.len()),
+        no_vote_names,
+        "```".to_string(),
+        no_vote_mentions,
+        "```".to_string(),
+        "".to_string(),
+        "".to_string(),
+    ], MSG_LEN_LIMIT);
 }
 
 
@@ -600,6 +615,7 @@ fn compare_voted_to_in_voice_internal(
     -> String   //message that can be shown to the command user
 {
     let mut voted_but_not_in_channel = String::from("");
+    let mut voted_but_not_in_channel_descr: String = String::from("");
     let mut niv_names = String::from("");
     let mut niv_mentions = String::from("");
     let mut v_cnt = 0;
@@ -623,15 +639,30 @@ fn compare_voted_to_in_voice_internal(
         }
     }
     if voted_but_not_in_channel.len() > 0 {
-        voted_but_not_in_channel = format!("Unable to find these members. Could they have changed their display name?\n{}", 
-            voted_but_not_in_channel);
+        voted_but_not_in_channel_descr = format!("Unable to find these members. Could they have changed their display name?\n");
     }
-    if niv_names.len() > 0 {
-        niv_names = format!("These members selected {}, but were not found in voice channels ({}/{}):\n", APOLLO_ICONS[a_i], niv_cnt, v_cnt) 
-            + niv_names.as_str();
-        }
-    if niv_mentions.len() > 0 {niv_mentions = format!("```{}```", niv_mentions.as_str());}
-    return format!("{niv_names}{niv_mentions}{voted_but_not_in_channel}");
+
+    if niv_mentions.len() == 0 {
+        return utils::truncate_response_message([
+        format!("Everyone's in the voice channels 👌\n"),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        voted_but_not_in_channel_descr.to_string(),
+        voted_but_not_in_channel,
+    ], MSG_LEN_LIMIT);
+    } else {
+        return utils::truncate_response_message([
+        format!("These members selected {}, but were not found in the voice channels ({}/{}):\n", APOLLO_ICONS[a_i], niv_cnt, v_cnt),
+        niv_names,
+        "```".to_string(),
+        niv_mentions,
+        "```".to_string(),
+        voted_but_not_in_channel_descr.to_string(),
+        voted_but_not_in_channel,
+    ], MSG_LEN_LIMIT);
+    }
 }
 
 

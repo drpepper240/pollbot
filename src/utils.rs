@@ -360,3 +360,35 @@ pub async fn find_last_message_apollo_with_embed(ctx: &Context, ch_id: &ChannelI
     }
     return None;
 }
+
+// truncates or omits parts of the message, returns concatenated result
+// pt0 response descr
+// pt1 name list
+// pt2 ```
+// pt3 mentions
+// pt4 ```
+// pt5 not in channel (opt)
+// pt6 not in channel name list (opt)
+
+pub fn truncate_response_message(mut msg: [String; 7], limit: usize) -> String{
+    let placeholder = "...too long.";
+
+    fn msg_size(msg: &[String; 7]) -> usize{msg.iter().fold(0, |mut acc, item| {acc += item.len(); acc}) }
+    fn msg_concat(msg: &[String; 7]) -> String{msg.iter().fold("".to_string(), |mut acc, item| {acc += item; acc}) }
+    fn shorten_string_w_placeholder(text: &String, shorten_by: usize, placeholder: &str) -> String { // output string is at least placeholder.len() long
+        text[..text.floor_char_boundary(text.len().saturating_sub(shorten_by + placeholder.len()))].to_owned() + placeholder }
+    
+    if msg_size(&msg) <= limit { return msg_concat(&msg) }
+    msg[1] = shorten_string_w_placeholder(&msg[1], msg_size(&msg) - limit, placeholder);
+    if msg_size(&msg) <= limit { return msg_concat(&msg) }
+    msg[6] = shorten_string_w_placeholder(&msg[6], msg_size(&msg) - limit, placeholder);
+    if msg_size(&msg) <= limit { return msg_concat(&msg) }
+    msg[1] = "".to_string();
+    msg[5] = "".to_string();
+    msg[6] = "".to_string();
+    if msg_size(&msg) <= limit { return msg_concat(&msg) }
+    msg[3] = shorten_string_w_placeholder(&msg[3], msg_size(&msg) - limit, placeholder);
+    if msg_size(&msg) <= limit { return msg_concat(&msg) }
+    
+    return "truncate_response_message limit is too small.".to_string();
+}
