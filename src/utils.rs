@@ -1,9 +1,15 @@
+use core::time;
+use std::collections::HashSet;
+use std::thread::sleep;
+
 use serenity::all::CacheHttp;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
 use serenity::all::CommandInteraction;
 use serenity::all::Context;
+use serenity::all::CreateAttachment;
 use serenity::all::GuildId;
+use serenity::all::Http;
 use serenity::all::Member;
 use serenity::all::Message;
 use serenity::all::MessageBuilder;
@@ -392,4 +398,40 @@ pub fn truncate_response_message(mut msg: [String; 7], limit: usize) -> String{
     if msg_size(&msg) <= limit { return msg_concat(&msg) }
     
     return "truncate_response_message limit is too small.".to_string();
+}
+
+
+pub async fn go_steal_some_emoji(ctx: &Context, to_g_id: &GuildId,) -> String {
+    let mut existing_names: HashSet<String> = HashSet::new();
+    if let Ok(existing_emoji) = to_g_id.emojis(ctx).await{
+        for ee in existing_emoji {existing_names.insert(ee.name);}
+    }
+    let from_g_id = GuildId::from(0987654321u64); // guild id to steal from
+    match from_g_id.emojis(ctx).await
+    {
+        Ok(emojis) => {
+            for e in &emojis {
+                println!("available: {}, name: {}, url: {}", e.available, e.name, e.url().to_string());
+                if existing_names.contains(&e.name) {
+                    println!("SKIPPING"); 
+                    continue;
+                }
+                println!("Sleeping 10..."); 
+                sleep(time::Duration::from_secs(10));
+                match CreateAttachment::url(ctx, &e.url()).await{
+                    Ok(e_attachment) =>{
+                        match to_g_id.create_emoji(ctx, &e.name, &e_attachment.to_base64()).await{
+                            Ok(new_e) => println!("Created new emoji {}", new_e.name),
+                            Err(e) => {println!("Failed to create emoji: {}", e.to_string()); return e.to_string()},
+                        }
+                    },
+                    Err(e) => {println!("Failed to create attachment: {}", e.to_string()); return e.to_string()},
+                }
+            }
+            
+            return format!("{}", emojis.len());
+        },
+        Err(e) => return e.to_string(),
+    }
+    //return "nah fuck it".to_string();
 }

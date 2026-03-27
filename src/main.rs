@@ -118,11 +118,11 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
 
         //registering commands (guild-specific for now)
-        let guild_id = GuildId::from(330410844854943745);
+        let guild_id = GuildId::from(123456789);
 
-        let _commands = guild_id
+        let commands = guild_id
             .set_commands(&ctx, vec![
-        //         commands::new_poll::register(),
+                //commands::steal_emoji::register(),
                     // commands::apollo_get_accepted::register(),
     //         commands::apollo_get_tentative::register(),
         //         commands::get_not_voted::register(),
@@ -130,7 +130,7 @@ impl EventHandler for Handler {
             ])
             .await;
         
-        //println!("I now have the following guild slash commands: {commands:#?}");
+        println!("I now have the following guild slash commands: {commands:#?}");
             
         let mut gcv =  vec![commands::apollo_get_accepted::register(),
                 commands::apollo_get_tentative::register(),
@@ -221,6 +221,9 @@ impl EventHandler for Handler {
                             "apollo_get_not_in_voice" => {
                                 response_str = compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, compare_voted_to_in_voice_internal, 0).await;
                             },
+                            "steal_emoji" => {
+                                response_str = utils::go_steal_some_emoji(&ctx, &g_id).await;
+                            }
                             _ => response_str = "Not implemented :(".to_string(),
                         };
                     } else {
