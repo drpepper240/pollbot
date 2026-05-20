@@ -24,11 +24,22 @@ use serenity::model::application::{Command, Interaction};
 #[cfg(feature = "apollo_support")]
 mod apollo_utils;
 
+#[cfg(feature = "third_party_bots")]
+mod tpbot_utils;
+
 struct Handler;
 
 static REACTION_A: char = '✅';
 static REACTION_D: char = '❌';
 static REACTION_T: char = '❔';
+const POLL_OPTS: [char; 3] = [REACTION_A, REACTION_D, REACTION_T];
+
+const BOT_ID_APOLLO:   u64 = 475744554910351370u64;  //Apollo bot
+// const BOT_ID_CARL:     u64 = 235148962103951360u64;  //Carl bot
+// const BOT_ID_JUNIPER:  u64 = 310848622642069504u64;  //Juniper bot
+const BOT_ID_PANCAKE:  u64 = 627525335423909909u64;  //Pancake bot
+const BOT_ID_POLLBOT:  u64 = 1470761370944405695u64; //Pollbot //TODO get from cache //TODO cache somewhere closer
+
 
 
 #[cfg(feature = "poll_creation")]
@@ -37,6 +48,7 @@ enum ReactionChangeType {
     REMOVE,
     REMOVEEMOJI,
 }
+
 
 
 #[async_trait]
@@ -108,52 +120,47 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
 
         //registering commands (guild-specific for now)
-        let guild_id = GuildId::from(330410844854943745);
+        let guild_id = GuildId::from(330410844854943745); //own
 
-        let _commands = guild_id
+
+        let g_commands = guild_id
             .set_commands(&ctx, vec![
-        //         commands::new_poll::register(),
-                    // commands::apollo_get_accepted::register(),
-    //         commands::apollo_get_tentative::register(),
-        //         commands::get_not_voted::register(),
-        //         commands::get_not_in_voice::register(),
+                //commands::test::register(),
             ])
             .await;
         
-        //println!("I now have the following guild slash commands: {commands:#?}");
-        let mut gcv: Vec<serenity::builder::CreateCommand> = vec![];
+        println!("I now have the following guild slash commands: {g_commands:#?}");
+        let mut gcv: Vec<serenity::builder::CreateCommand> = vec![
+            commands::lineup::register(),
+            //commands::test::register(),
+            commands::get_accepted::register(),
+            commands::get_tentative::register(),
+            commands::get_no_vote::register(),
+            commands::get_not_in_voice::register(),
+        ];
         if cfg!(feature="poll_creation") {
-            gcv.extend_from_slice(&[commands::new_poll::register(),
-                commands::get_accepted::register(),
-                commands::get_tentative::register(),
-                commands::get_no_vote::register(),
-                commands::get_not_in_voice::register(), ]);
+            gcv.extend_from_slice(&[
+                commands::new_poll::register(),
+            ]);
         }
-        if cfg!(feature="apollo_support") {
-            gcv.extend_from_slice(&[commands::apollo_get_accepted::register(),
-                commands::apollo_get_tentative::register(),
-                commands::apollo_get_no_vote::register(),
-                commands::apollo_get_not_in_voice::register(),]);
-        }
-
         let g_commands = Command::set_global_commands(&ctx, gcv).await;
         println!("I now have the following global slash commands: {g_commands:#?}");
     }
 
     async fn interaction_create(&self, ctx: Context, inter: Interaction) {
         if let Interaction::Command(cmd) = inter {
-            //println!("Received command interaction: {cmd:#?}");
 
-            if !utils::do_we_have_to_listen_to_this_guy(&ctx, &cmd).await {
-                let resp_msg = CreateInteractionResponseMessage::new()
-                .content("To use this command you have to be in the guild text channel while having at least one common role with the bot.")
-                .ephemeral(true);
-                let builder = CreateInteractionResponse::Message(resp_msg);
-                if let Err(why) = cmd.create_response(&ctx.http, builder).await {
-                    println!("Cannot respond to slash command: {why}");
-                }
-                return;
-            }
+
+            // if !utils::do_we_have_to_listen_to_this_guy(&ctx, &cmd).await {
+            //     let resp_msg = CreateInteractionResponseMessage::new()
+            //     .content("To use this command you have to be in the guild text channel while having at least one common role with the bot.")
+            //     .ephemeral(true);
+            //     let builder = CreateInteractionResponse::Message(resp_msg);
+            //     if let Err(why) = cmd.create_response(&ctx.http, builder).await {
+            //         println!("Cannot respond to slash command: {why}");
+            //     }
+            //     return;
+            // }
 
             let d_msg = CreateInteractionResponseMessage::new()
             .content("Running command...")
@@ -161,6 +168,30 @@ impl EventHandler for Handler {
             let builder = CreateInteractionResponse::Defer(d_msg);
             if let Err(why) = cmd.create_response(&ctx.http, builder).await {
                 println!("Cannot respond to slash command: {why}");
+            }
+
+            if cmd.data.name.as_str() == "test" {
+                println!("/test :");
+                if let Some(g_id)= cmd.guild_id
+                {
+                    let _ = commands::test::run(&ctx, &cmd, g_id).await;
+                } else {
+                    println!("No guild info");
+                }
+                return;
+            }
+
+            if let Some(g_id)= cmd.guild_id {
+                match cmd.data.name.as_str() {
+                    "get_no_vote" => {commands::get_no_vote::run(&ctx, &cmd, g_id).await; return;},
+                    "get_tentative" => {commands::get_tentative::run(&ctx, &cmd, g_id).await; return;},
+                    "get_accepted" => {commands::get_accepted::run(&ctx, &cmd, g_id).await; return;},
+                    "get_not_in_voice" => {commands::get_not_in_voice::run(&ctx, &cmd, g_id).await; return;},
+                    "lineup" => {commands::lineup::run(&ctx, &cmd, g_id).await; return;},
+                    _ => {},
+                }
+            }else {
+                    println!("No guild info");
             }
 
             let response_str: String;
@@ -177,30 +208,30 @@ impl EventHandler for Handler {
                                     Err(e) => format!("'/new_poll' error: {}", e),
                                 };
                             },
-                            "get_not_voted" => {
-                                match mention_all_who_not_voted(&ctx, &ch, &g_id, &cmd.user).await {
-                                    Ok(s) => {response_str = s; response_eph = true},
-                                    Err(e) => {response_str = e.to_string(); response_eph = true},
-                                }
-                            },
-                            "get_tentative" => {
-                                match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_T, &cmd.user).await {
-                                    Ok(s) => {response_str = s; response_eph = true},
-                                    Err(e) => {response_str = e.to_string(); response_eph = true},
-                                }
-                            },
-                            "get_accepted" => {
-                                match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
-                                    Ok(s) => {response_str = s; response_eph = true},
-                                    Err(e) => {response_str = e.to_string(); response_eph = true},
-                                }
-                            },
-                            "get_not_in_voice" => {
-                                match mention_all_who_voted_emoji_not_in_voice(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
-                                    Ok(s) => {response_str = s; response_eph = true},
-                                    Err(e) => {response_str = e.to_string(); response_eph = true},
-                                }
-                            },
+                            // "get_not_voted" => {
+                            //     match mention_all_who_not_voted(&ctx, &ch, &g_id, &cmd.user).await {
+                            //         Ok(s) => {response_str = s; response_eph = true},
+                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
+                            //     }
+                            // },
+                            // "get_tentative" => {
+                            //     match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_T, &cmd.user).await {
+                            //         Ok(s) => {response_str = s; response_eph = true},
+                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
+                            //     }
+                            // },
+                            // "get_accepted" => {
+                            //     match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
+                            //         Ok(s) => {response_str = s; response_eph = true},
+                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
+                            //     }
+                            // },
+                            // "get_not_in_voice" => {
+                            //     match mention_all_who_voted_emoji_not_in_voice(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
+                            //         Ok(s) => {response_str = s; response_eph = true},
+                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
+                            //     }
+                            // },
                             #[cfg(feature = "apollo_support")]
                             "apollo_get_accepted" => {
                                 response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_members_internal, 0).await;
@@ -216,6 +247,10 @@ impl EventHandler for Handler {
                             #[cfg(feature = "apollo_support")]
                             "apollo_get_not_in_voice" => {
                                 response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_in_voice_internal, 0).await;
+                            },
+                             #[cfg(feature = "apollo_support")]
+                            "pancake_get_not_in_voice" => {
+                                response_str = apollo_utils::compare_pancake_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_in_voice_internal, 0).await;
                             },
                             _ => response_str = "Not implemented :(".to_string(),
                         };
@@ -457,6 +492,8 @@ async fn mention_all_who_voted_emoji_not_in_voice(ctx: &Context, pch: &PartialCh
     }
 }
 
+
+// test command
 
 
 

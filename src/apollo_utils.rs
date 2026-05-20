@@ -15,6 +15,7 @@ use serenity::all::GuildId;
 use serenity::all::Context;
 use serenity::all::Message;
 use crate::utils;
+use crate::utils::find_last_message_from_user_with_embed;
 use serenity::futures::StreamExt;
 
 
@@ -22,7 +23,7 @@ static APOLLO_A: &str = "<:accepted:713124484436983971>";
 static APOLLO_D: &str = "<:declined:713124484688642068>";
 static APOLLO_T: &str = "<:tentative:713214962641666109>";
 
-static MSG_LEN_LIMIT: usize = 1996;
+
 
 static APOLLO_ICONS: [char; 3] = [crate::REACTION_A, crate::REACTION_D, crate::REACTION_T];
 
@@ -67,7 +68,7 @@ pub fn compare_voted_to_members_internal(
         "```".to_string(),
         voted_but_not_in_channel_descr.to_string(),
         voted_but_not_in_channel,
-    ], MSG_LEN_LIMIT);
+    ], utils::LEN_LIMIT_MSG);
 }
 
 
@@ -112,7 +113,7 @@ pub fn compare_non_vote_to_members_internal(
         "```".to_string(),
         "".to_string(),
         "".to_string(),
-    ], MSG_LEN_LIMIT);
+    ], utils::LEN_LIMIT_MSG);
 }
 
 
@@ -164,7 +165,7 @@ pub fn compare_voted_to_in_voice_internal(
         "".to_string(),
         voted_but_not_in_channel_descr.to_string(),
         voted_but_not_in_channel,
-    ], MSG_LEN_LIMIT);
+    ], utils::LEN_LIMIT_MSG);
     } else {
         return truncate_response_message([
         format!("These members selected {}, but were not found in the voice channels ({}/{}):\n", APOLLO_ICONS[a_i], niv_cnt, v_cnt),
@@ -174,7 +175,7 @@ pub fn compare_voted_to_in_voice_internal(
         "```".to_string(),
         voted_but_not_in_channel_descr.to_string(),
         voted_but_not_in_channel,
-    ], MSG_LEN_LIMIT);
+    ], utils::LEN_LIMIT_MSG);
     }
 }
 
@@ -198,6 +199,7 @@ pub async fn compare_apollo_to_channel_members(
             if m.user.id == UserId::from(475744554910351370u64) {continue;} //Apollo bot
             if m.user.id == UserId::from(235148962103951360u64) {continue;}  //Carl bot
             if m.user.id == UserId::from(310848622642069504u64) {continue;}  //Juniper bot
+            if m.user.id == UserId::from(627525335423909909u64) {continue;}  //Pancake bot
             if m.user.id == UserId::from(1470761370944405695u64) {continue;} //Pollbot //TODO get from cache //TODO cache somewhere closer
             members.insert(m.display_name().to_string(), m.clone()); //identical display names can be caught here
         }
@@ -222,7 +224,7 @@ pub async fn compare_apollo_to_channel_members(
 // options. Some vecs can be empty. Returns None on failure.
 pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Option<[Vec<String>; 3]>
 {
-    if let Some(msg) = find_last_message_apollo_with_embed(ctx, ch_id).await {
+    if let Some(msg) = find_last_message_from_user_with_embed(ctx, ch_id, &UserId::from(475744554910351370)).await {
         fn trim_and_split_names(s: &str) -> Option<Vec<String>>{
             if let Some(s) = s.strip_prefix(">>> "){
                 let mut v: Vec<String>= Vec::new();
@@ -269,22 +271,94 @@ pub async fn get_and_parse_apollo_poll(ctx: &Context, ch_id: &ChannelId)  -> Opt
 }
 
 
-// find the last Apollo's message in the channel with embed
-pub async fn find_last_message_apollo_with_embed(ctx: &Context, ch_id: &ChannelId) -> Option<Message>
+pub async fn compare_pancake_to_channel_members(
+    ctx: &Context, 
+    ch_id: &ChannelId, 
+    g_id: &GuildId, 
+    internal_fn: fn([Vec<String>; 3], HashMap<String, Member>, usize, Option<HashMap<UserId, VoiceState>>) -> String,
+    apollo_option_index: usize) -> String
 {
-    let apollo_id = UserId::from(475744554910351370);
-    let mut messages = ch_id.messages_iter(&ctx).boxed();
-    while let Some(message_result) = messages.next().await {
-        match message_result {
-            Ok(msg) => if msg.author.id == apollo_id && msg.embeds.len() > 0 {return Some(msg)},
-            Err(error) => {
-                println!("Error getting last Apollo's message: {}", error);
-                return  None;
-            }
+    // get list of channel members
+    if let Ok (members_vec) = get_members_from_channelid_cached(ctx, ch_id, g_id)
+    {
+        // UserId to DisplayName for each member of the channel
+        let mut members: HashMap<String, Member> = HashMap::new();
+        for m in members_vec{
+            // skip bots
+            if m.user.id == UserId::from(475744554910351370u64) {continue;} //Apollo bot
+            if m.user.id == UserId::from(235148962103951360u64) {continue;}  //Carl bot
+            if m.user.id == UserId::from(310848622642069504u64) {continue;}  //Juniper bot
+            if m.user.id == UserId::from(627525335423909909u64) {continue;}  //Pancake bot
+            if m.user.id == UserId::from(1470761370944405695u64) {continue;} //Pollbot //TODO get from cache //TODO cache somewhere closer
+            members.insert(m.display_name().to_string(), m.clone()); //identical display names can be caught here
         }
+        //get users in voice
+        let possibly_in_voice = utils::get_all_members_in_voice_cached(ctx, g_id);
+        // get list of people from the poll
+        if let Some(poll_results) = get_and_parse_pancake_poll(&ctx, ch_id).await {
+            // compare
+            internal_fn(poll_results, members, apollo_option_index, possibly_in_voice) //TODO check index validity here
+        } else {
+            //TODO signal error
+            return "Unable to find the poll.".to_string();
+        }
+    } else {
+        //TODO signal error
+        return "Unable to get members from the current channel.".to_string();
+    }
+}
+
+
+pub async fn get_and_parse_pancake_poll(ctx: &Context, ch_id: &ChannelId) -> Option<[Vec<String>; 3]>
+{
+    if let Some(msg) = find_last_message_from_user_with_embed(ctx, ch_id, &UserId::from(627525335423909909u64)).await {
+        fn trim_and_split_names(s: &str) -> Option<Vec<String>>{
+            println!("{s}");
+            let mut v: Vec<String>= Vec::new();
+            let s = s.replace("\\\\", "\\"); //the string received from the JSON embed appears to be double-serialized for some reason
+            let mut l_iter = s.lines();
+            while let Some(l) = l_iter.next() {
+                if let Some(l) = l.strip_prefix("> "){
+                    println!("{l}");
+                    v.push(l.to_string());
+                }
+            }
+            if !v.is_empty() {return Some(v)};
+            return None;
+        }
+
+        let mut a_str = String::new();
+        let mut d_str = String::new();
+        let mut t_str = String::new();
+        match msg.embeds.get(0) {
+            None => {println!("No embeds found. Message content in question:"); println!("{}", msg.content); return None;},
+            Some (e) => {
+                for f in e.fields.clone() {
+                    if f.name.starts_with("✅") { //TODO use APOLLO_OPTIONS tuple instead
+                        a_str = f.value;
+                    } else if f.name.starts_with("❌") {
+                        d_str = f.value;
+                    } else if f.name.starts_with("❔") {
+                        t_str = f.value;
+                    }
+                }
+            },
+        };
+       
+        let mut v_a: Vec<String>= Vec::new();
+        let mut v_d: Vec<String>= Vec::new();
+        let mut v_t: Vec<String>= Vec::new();
+        if let Some(a) = trim_and_split_names(&a_str) {v_a = a;}
+        if let Some(d) = trim_and_split_names(&d_str) {v_d = d;}
+        if let Some(t) = trim_and_split_names(&t_str) {v_t = t;}
+        // return Some((v_a, v_d, v_t));
+        return Some([v_a, v_d, v_t]);
+    } else {
+        println!("Pancake's message was not found!");
     }
     return None;
 }
+
 
 // truncates or omits parts of the message, returns concatenated result
 // pt0 response descr

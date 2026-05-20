@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use serenity::all::CacheHttp;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
 use serenity::all::CommandInteraction;
 use serenity::all::Context;
+use serenity::all::CreateInteractionResponseFollowup;
 use serenity::all::GuildId;
 use serenity::all::Member;
 use serenity::all::Message;
@@ -10,6 +14,19 @@ use serenity::all::MessageBuilder;
 use serenity::all::PartialChannel;
 use serenity::all::UserId;
 use serenity::futures::StreamExt;
+use crate::POLL_OPTS;
+
+#[cfg(feature = "third_party_bots")]
+use {crate::tpbot_utils,
+    crate::tpbot_utils::convert_names_to_ids,
+};
+
+#[cfg(feature = "third_party_bots")]
+pub const SUPPORTED_BOTS: [u64;2]= [crate::BOT_ID_APOLLO, crate::BOT_ID_PANCAKE];  //TODO add own id here
+#[cfg(not(feature = "third_party_bots"))]
+pub const SUPPORTED_BOTS: [u64;0]= [];//and here
+
+
 #[cfg(feature = "poll_creation")]
 use {crate::ReactionChangeType, 
     serenity::all::EditMessage,
@@ -17,6 +34,15 @@ use {crate::ReactionChangeType,
     serenity::all::ReactionType,
     serenity::all::Mentionable,
 };
+
+pub const LEN_LIMIT_MSG: usize = 1996;
+pub const LEN_LIMIT_UID_MENTION: usize = 23; //<@19symbolshere>
+
+pub enum UserComparison {
+    MembersSelectedOption,
+    MembersNotSelectedOption,
+    MembersSelectedOptionNotInVoice,
+}
 
 
 // Find an active guild thread by its parent_id, will check against the name if given
@@ -113,7 +139,7 @@ pub fn get_all_members_in_voice_cached(ctx: &Context,  g_id: &GuildId) -> Option
 
 
 pub fn get_members_from_channelid_cached(ctx: &Context, ch_id: &ChannelId, g_id: &GuildId)
-    -> Result<Vec<Member>, serenity::Error>
+    -> Result<Vec<Member>, String>
 {
     if let Some(g) = g_id.to_guild_cached(&ctx)
     {
@@ -121,16 +147,32 @@ pub fn get_members_from_channelid_cached(ctx: &Context, ch_id: &ChannelId, g_id:
         {
             match g_ch.members(&ctx) {
                 Ok(result) => return Ok(result),
-                Err(e) => {println!("get_members_from_channel_cached error: {e}"); return Err(e)},
+                Err(e) => {println!("get_members_from_channel_cached error: {e}"); return Err(e.to_string());},
             }
         } else {
             println!("Can't get guild channel from cache.");
+            return Err("Can't get guild channel from cache.".to_string());
         }
     } else {
         println!("Can't get guild from cache.");
+        return Err("Can't get guild from cache.".to_string());
     }
+}
 
-    return Ok(Vec::new());
+
+pub async fn get_members_from_channelid(ctx: &Context, ch_id: &ChannelId)
+    -> Result<Vec<Member>, String>
+{
+    let Ok(ch) = ch_id.to_channel(&ctx).await else {
+        return Err("Can't get channel from channel_id.".to_string());
+    };
+    let Some(g_ch) = ch.guild() else {
+         return Err("Can't get guild channel from channel.".to_string());
+    };
+    match g_ch.members(&ctx) {
+        Ok(members)=> return Ok(members),
+        Err(e) => return Err(format!("Can't get members from guild channel: {}", e.to_string())),
+    }
 }
 
 
@@ -345,3 +387,265 @@ async fn edit_msg_with_reactions(ctx: &Context, mut msg: Message, g_id: &GuildId
 }
 
 
+pub async fn find_last_message_from_user_with_embed(ctx: &Context, ch_id: &ChannelId, u_id: &UserId) -> Option<Message>
+{
+    let mut messages = ch_id.messages_iter(&ctx).boxed();
+    while let Some(message_result) = messages.next().await {
+        match message_result {
+            Ok(msg) => if msg.author.id == *u_id && msg.embeds.len() > 0 {return Some(msg)},
+            Err(error) => {
+                println!("Error getting last message from the user {}: {}", u_id, error);
+                return  None;
+            }
+        }
+    }
+    return None;
+}
+
+
+pub async fn send_ephemeral_followup(ctx: &Context, text: &String, ci: &CommandInteraction) {
+    let followup_msg = CreateInteractionResponseFollowup::new()
+        .content(text)
+        .ephemeral(true);
+    if let Err(why) = ci.create_followup(&ctx.http, followup_msg).await {
+        println!("Cannot respond to slash command: {why}");
+    }
+}
+
+
+// sends up to 9 follow-up ephemeral messages containing uids formatted as code with preceding text message
+pub async fn send_ephemeral_followups_with_uids(ctx: &Context, text: &String, uids: &Vec<UserId>, ci: &CommandInteraction) {
+    fn join_uids(uids: &[UserId]) -> String{
+        let mut res = String::new();
+        for uid in uids {
+            res += format!("<@{}>", uid.to_string()).as_str();
+        }
+        return res;
+    }
+    //1st msg
+    let num_mentions_possible = (LEN_LIMIT_MSG - text.len()).saturating_sub(6) / LEN_LIMIT_UID_MENTION;
+    if num_mentions_possible <= 0 {println!("LEN_LIMIT_MSG is too small"); return;}
+    let mut num_mentions_sent = num_mentions_possible.clamp(0, uids.len());
+    let followup_msg_1 = CreateInteractionResponseFollowup::new()
+        .content(format!("{text}```{}```", join_uids(&uids[0..num_mentions_sent])))
+        .ephemeral(true);
+    if let Err(why) = ci.create_followup(&ctx.http, followup_msg_1).await {
+        println!("Cannot respond to slash command: {why}");
+        return;
+    }
+    let mut msgs_sent = 1;
+    let uids_fit_in_one_message = LEN_LIMIT_MSG.saturating_sub(6) / LEN_LIMIT_UID_MENTION;
+
+    //other messages if needed
+    while num_mentions_sent < uids.len() && msgs_sent < 9 {
+        let num_mentions_sent_new = (num_mentions_sent + uids_fit_in_one_message).clamp(0, uids.len());
+        let followup_msg = CreateInteractionResponseFollowup::new()
+            .content(format!("```{}```", join_uids(&uids[num_mentions_sent..num_mentions_sent_new])))
+            .ephemeral(true);
+        if let Err(why) = ci.create_followup(&ctx.http, followup_msg).await {
+            println!("Cannot respond to slash command: {why}");
+            return;
+        }
+        num_mentions_sent = num_mentions_sent_new;
+        msgs_sent += 1;
+    }
+}
+
+
+pub async fn compare_channel_members_to_poll_and_respond(
+    ctx: &Context, 
+    ci: &CommandInteraction, 
+    g_id: GuildId, 
+    comp_type: UserComparison,
+    comp_option: Option<usize>,
+) {
+    // get all non-bot users from the channel
+    //let non_bots_vec: Vec<Member> = match get_members_from_channelid_cached(ctx, &ci.channel_id, &g_id) {
+    let non_bots_vec: Vec<Member> = match get_members_from_channelid(ctx, &ci.channel_id).await {
+        Ok(mv) => mv.into_iter()
+                                .filter(|m| m.user.bot==false)
+                                .collect(),
+        Err(e) => {
+            send_ephemeral_followup(ctx,&format!("Can't get members from this channel: {}", e), ci).await; return;
+        },
+    };
+
+    // get message with the poll
+    let msg = match find_last_message_from_supported_bot_with_embed(ctx, &ci.channel_id).await {
+        Some(m) => m,
+        None => {
+            send_ephemeral_followup(ctx,&"Poll not found!".to_string(), ci).await; return;
+        },
+    };
+
+    let mut poll_responses: [Vec<UserId>; 3] = Default::default(); // poll results end up here
+    let mut warn_reply = String::new(); //any warnings to present to the command user should be added here
+
+    // get all users from poll results
+    // could produce a message we want to show the user if something's wrong with the results
+    if msg.id.get() == crate::BOT_ID_POLLBOT {
+        //parse own msg 
+        //check if someone left the channel here (since for 3rd party it's being done in convert_names_to_ids)
+        send_ephemeral_followup(ctx,&"Parsing own polls is not supported yet!".to_string(), ci).await; return; 
+    } else {
+        //parse 3rd party bot msg
+        #[cfg(feature = "third_party_bots")]
+        match tpbot_utils::parse_tp_bot_poll(&msg) {
+            Ok(names_arr) => {
+                let mut same_names = MessageBuilder::new();
+                let mut member_name_map: HashMap<String, Member>= HashMap::new();
+                for m in &non_bots_vec { //can't do this by chaining .map and .collect sadly
+                    if let Some(old_m) = member_name_map.insert(m.display_name().to_string(), m.clone()) { 
+                        same_names.mention(&old_m).push(" and ".to_string()).mention(m);
+                    }
+                }
+                let same_names = same_names.build();
+                if same_names.len() > 0 {
+                    warn_reply += format!("The following members have identical display names:\n{same_names}\n").as_str();
+                }
+                let r: String;
+                (poll_responses, r) = convert_names_to_ids(names_arr, &member_name_map);
+                if r.len() > 0 {warn_reply+= format!("{r}\n").as_str();};
+            },
+            Err(e) => {
+                send_ephemeral_followup(ctx, &format!("Failed to parse 3rd party bot's poll:\n{}", e), ci).await; return;
+            },
+        }
+    }
+
+    
+    // do a comparison
+    match comp_type {
+        comp_type @ (UserComparison::MembersSelectedOption | UserComparison::MembersSelectedOptionNotInVoice) => {
+            //check comp_option for validity
+            if comp_option.is_none() {println!("comp_option is None"); return};
+            let selected = comp_option.unwrap();
+            if selected > 3 {println!("comp_option > 3"); return};
+            let members_reacted = &poll_responses[selected];
+            let react = POLL_OPTS[selected];
+            let reacted_n = poll_responses[selected].len();
+
+            match comp_type {
+                UserComparison::MembersSelectedOption => {
+                    if members_reacted.len() > 0 {
+                        if ci.locale == "ru" {
+                            send_ephemeral_followups_with_uids(
+                                ctx,
+                                &format!("Пользователи, выбравшие \"{}\" `{}`:", react, reacted_n ),
+                                &members_reacted,
+                                ci).await;
+                        }else{
+                            send_ephemeral_followups_with_uids(
+                                ctx,
+                                &format!("The following members selected \"{}\" `{}`:", react, reacted_n ),
+                                &members_reacted,
+                                ci).await;
+                            }
+                        
+                    } else {
+                        send_ephemeral_followup(
+                            ctx,
+                            &format!("Nobody selected \"{}\".", react),
+                            ci).await;
+                    }
+                },
+                _ => { //should be UserComparison::MembersSelectedOptionNotInVoice only but who knows?
+                    println!("UserComparison::MembersSelectedOptionNotInVoice");
+                    let mut cnt_in_v = 0;
+                    //TODO not from the cache
+                    let in_voice = get_all_members_in_voice_cached(ctx, &g_id).unwrap_or(Default::default());
+                    let mut not_in_voice: Vec<UserId> = Vec::new();
+                    for m in members_reacted {
+                        if in_voice.contains_key(m) {
+                            cnt_in_v +=1;
+                        } else {
+                            not_in_voice.push(m.clone());
+                        }
+                    }
+                    if reacted_n == 0 {
+                        send_ephemeral_followup(
+                            ctx,
+                            &format!("Nobody selected \"{}\".", react),
+                            ci).await;
+                    } else if cnt_in_v == reacted_n {
+                        send_ephemeral_followup(
+                            ctx,
+                            &format!("Everyone's in voice 👌 `{}/{}`", cnt_in_v, reacted_n),
+                            ci).await;
+                    } else {
+                        send_ephemeral_followups_with_uids(
+                            ctx,
+                            &format!("The following members selected \"{}\" and are not present in any of the voice channels right now 🔇 `{}/{}`:",
+                                react,
+                                not_in_voice.len(),
+                                reacted_n),
+                            &members_reacted,
+                            ci).await;
+                    }
+                },
+            }
+        },
+        UserComparison::MembersNotSelectedOption => {
+            //convert poll result to set
+            let mut voted: HashSet<UserId> = HashSet::new();
+            for i in poll_responses{
+                for r in i {
+                    voted.insert(r); //TODO find a better way to do this
+                }
+            }
+            //for each channel member try to find them in poll results
+            let mut did_not_vote: Vec<UserId> = Vec::new();
+            for m in &non_bots_vec {
+                if !voted.contains(&m.user.id) {
+                    did_not_vote.push(m.user.id.clone());
+                }
+            }
+            if did_not_vote.len() > 0 {
+                send_ephemeral_followups_with_uids(
+                    ctx,
+                    &format!("The following members haven't selected anything `{}/{}`:", did_not_vote.len(), non_bots_vec.len()),
+                    &did_not_vote,
+                    ci).await;
+            } else {
+                 send_ephemeral_followups_with_uids(
+                    ctx,
+                    &format!("Everyone has selected a poll option 👌 `{}/{}`:", non_bots_vec.len(), non_bots_vec.len()),
+                    &did_not_vote,
+                    ci).await;
+            }
+        },
+
+        _ => return,
+    }
+
+    // show the user results as a message(s)
+    
+    if warn_reply.len() > 0 {
+            send_ephemeral_followup(ctx,&warn_reply, ci).await; 
+    }
+}
+
+
+// Finds the last message with any embed authored by any id from SUPPORTED_BOTS, returns it or None
+// Calls the API
+pub async fn find_last_message_from_supported_bot_with_embed(ctx: &Context, ch_id: &ChannelId) -> Option<Message>
+{
+    let mut messages = ch_id.messages_iter(&ctx).boxed();
+    while let Some(message_result) = messages.next().await {
+        match message_result {
+            Ok(msg) => {
+                if msg.embeds.len() > 0 {
+                    for s_id in SUPPORTED_BOTS {
+                        if msg.author.id.get() == s_id {return Some(msg)}
+                    }
+                }
+            },
+            Err(error) => {
+                println!("Error getting next message from ch_id {}: {}", ch_id, error);
+                return None;
+            }
+        }
+    }
+    println!("No suitable messages found in ch_id {}.", ch_id);
+    return None;
+}

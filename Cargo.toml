@@ -9,10 +9,13 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 
 [features]
 # no features by default
-default = ["poll_creation", "apollo_support"]
+default = ["third_party_bots"]
 
 # Add feature "foo" here, then you can use it. 
 # Our "foo" feature depends on nothing else.
 poll_creation = []
 
 apollo_support = []
+
+# support for 3rd party poll/voting bots like Apollo and Pancake
+third_party_bots = []
