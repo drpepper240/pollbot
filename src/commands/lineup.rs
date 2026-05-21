@@ -1,7 +1,5 @@
-use core::num;
-
 use serenity::builder::CreateCommand;
-use serenity::all::{CommandInteraction, CommandOptionType, Context, CreateCommandOption, GuildId, MessageBuilder,};
+use serenity::all::{CommandInteraction, Context, CreateCommandOption, GuildId, MessageBuilder,};
 
 use crate::utils;
 

@@ -4,9 +4,9 @@ mod utils;
 use std::collections::HashMap;
 use std::env;
 use std::vec;
+use serenity::all::ActivityData;
 use serenity::all::ChannelId;
 use serenity::all::ChannelType;
-use serenity::all::CreateInteractionResponseFollowup;
 use serenity::all::PartialChannel;
 use serenity::all::User;
 use serenity::all::UserId;
@@ -20,9 +20,6 @@ use serenity::utils::MessageBuilder;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
 use serenity::model::application::{Command, Interaction};
 
-
-#[cfg(feature = "apollo_support")]
-mod apollo_utils;
 
 #[cfg(feature = "third_party_bots")]
 mod tpbot_utils;
@@ -53,28 +50,8 @@ enum ReactionChangeType {
 
 #[async_trait]
 impl EventHandler for Handler {
-    // Set a handler for the `message` event. This is called whenever a new message is received.
-    //
     // Event handlers are dispatched through a threadpool, and so multiple events can be
     // dispatched simultaneously.
-    // async fn message(&self, ctx: Context, msg: Message) {
-    //     if msg.content == "!ping" {
-    //         println!("msg.author.id: {}", msg.author.id);
-    //         println!("msg.channel_id: {}", msg.channel_id);
-    //         // Sending a message can fail, due to a network error, an authentication error, or lack
-    //         // of permissions to post in the channel, so log to stdout when some error happens,
-    //         // with a description of it.
-    //         if let Err(why) = msg.channel_id.say(&ctx.http, "```Pong!```").await {
-    //             println!("Error sending message: {why:?}");
-    //         }
-    //     } else if msg.content == "!new" {
-    //         match send_msg_with_reactions(&ctx, msg.channel_id, msg.author.id,).await
-    //         {
-    //             Ok(s) => println!("!new: {}", s),
-    //             Err(e) => println!("!new error: {}", e),
-    //         };
-    //     }
-    // }
 
     // reaction add handler
     #[cfg(feature = "poll_creation")]
@@ -149,19 +126,6 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: Context, inter: Interaction) {
         if let Interaction::Command(cmd) = inter {
-
-
-            // if !utils::do_we_have_to_listen_to_this_guy(&ctx, &cmd).await {
-            //     let resp_msg = CreateInteractionResponseMessage::new()
-            //     .content("To use this command you have to be in the guild text channel while having at least one common role with the bot.")
-            //     .ephemeral(true);
-            //     let builder = CreateInteractionResponse::Message(resp_msg);
-            //     if let Err(why) = cmd.create_response(&ctx.http, builder).await {
-            //         println!("Cannot respond to slash command: {why}");
-            //     }
-            //     return;
-            // }
-
             let d_msg = CreateInteractionResponseMessage::new()
             .content("Running command...")
             .ephemeral(true);
@@ -170,6 +134,7 @@ impl EventHandler for Handler {
                 println!("Cannot respond to slash command: {why}");
             }
 
+            //special case
             if cmd.data.name.as_str() == "test" {
                 println!("/test :");
                 if let Some(g_id)= cmd.guild_id
@@ -190,83 +155,8 @@ impl EventHandler for Handler {
                     "lineup" => {commands::lineup::run(&ctx, &cmd, g_id).await; return;},
                     _ => {},
                 }
-            }else {
-                    println!("No guild info");
-            }
-
-            let response_str: String;
-            let mut response_eph = true;
-
-            if let Some(g_id)= cmd.guild_id
-            {
-                if let Some(ref ch) = cmd.channel
-                    {
-                        match cmd.data.name.as_str() {
-                            "new_poll" => {
-                                response_str = match create_new_poll(&ctx, cmd.channel_id, &g_id, &cmd.user).await {
-                                    Ok(s) => format!("{}", s),
-                                    Err(e) => format!("'/new_poll' error: {}", e),
-                                };
-                            },
-                            // "get_not_voted" => {
-                            //     match mention_all_who_not_voted(&ctx, &ch, &g_id, &cmd.user).await {
-                            //         Ok(s) => {response_str = s; response_eph = true},
-                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
-                            //     }
-                            // },
-                            // "get_tentative" => {
-                            //     match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_T, &cmd.user).await {
-                            //         Ok(s) => {response_str = s; response_eph = true},
-                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
-                            //     }
-                            // },
-                            // "get_accepted" => {
-                            //     match mention_all_who_voted_emoji(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
-                            //         Ok(s) => {response_str = s; response_eph = true},
-                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
-                            //     }
-                            // },
-                            // "get_not_in_voice" => {
-                            //     match mention_all_who_voted_emoji_not_in_voice(&ctx, &ch, &g_id, REACTION_A, &cmd.user).await {
-                            //         Ok(s) => {response_str = s; response_eph = true},
-                            //         Err(e) => {response_str = e.to_string(); response_eph = true},
-                            //     }
-                            // },
-                            #[cfg(feature = "apollo_support")]
-                            "apollo_get_accepted" => {
-                                response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_members_internal, 0).await;
-                            },
-                            #[cfg(feature = "apollo_support")]
-                            "apollo_get_tentative" => {
-                                response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_members_internal, 2).await;
-                            },
-                            #[cfg(feature = "apollo_support")]
-                            "apollo_get_no_vote" => {
-                                response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_non_vote_to_members_internal, 0).await;
-                            },
-                            #[cfg(feature = "apollo_support")]
-                            "apollo_get_not_in_voice" => {
-                                response_str = apollo_utils::compare_apollo_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_in_voice_internal, 0).await;
-                            },
-                             #[cfg(feature = "apollo_support")]
-                            "pancake_get_not_in_voice" => {
-                                response_str = apollo_utils::compare_pancake_to_channel_members(&ctx, &ch.id, &g_id, apollo_utils::compare_voted_to_in_voice_internal, 0).await;
-                            },
-                            _ => response_str = "Not implemented :(".to_string(),
-                        };
-                    } else {
-                        response_str = "Can't get channel from the command. Are you running this command in a server?".to_string();
-                    }
             } else {
-                response_str = "Can't get guild_id. Are you running this command in a server?".to_string();
-            }
-
-            let followup_msg = CreateInteractionResponseFollowup::new()
-            .content(&response_str)
-            .ephemeral(response_eph);
-            if let Err(why) = cmd.create_followup(&ctx.http, followup_msg).await {
-                println!("Cannot respond to slash command: {why}");
-                println!("response_str.len()={}", response_str.len());
+                    println!("No guild info");
             }
         }
     }
@@ -525,8 +415,10 @@ async fn main() {
 
     // Create a new instance of the Client, logging in as a bot. This will automatically prepend
     // your bot token with "Bot ", which is a requirement by Discord for bot users.
-    let mut client =
-        Client::builder(&token, intents).event_handler(Handler).await.expect("Err creating client");
+    let ad= ActivityData::custom("v".to_owned() + env!("CARGO_PKG_VERSION"));
+    let mut client = Client::builder(&token, intents)
+            .activity(ad)
+            .event_handler(Handler).await.expect("Err creating client");
 
     // Finally, start a single shard, and start listening to events.
     //

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use serenity::{all::{ChannelId, Context, Member, Message, User, UserId}, futures::StreamExt};
+use serenity::{all::{Member, Message, UserId},};
 
 
 const APOLLO_ADT: [&str; 3] = ["<:accepted:713124484436983971>", "<:declined:713124484688642068>", "<:tentative:713214962641666109>"];

@@ -4,8 +4,4 @@ pub mod get_not_in_voice;
 pub mod get_no_vote;
 pub mod get_tentative;
 pub mod lineup;
-pub mod apollo_get_accepted;
-pub mod apollo_get_not_in_voice;
-pub mod apollo_get_no_vote;
-pub mod apollo_get_tentative;
 pub mod test;
