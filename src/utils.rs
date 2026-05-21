@@ -12,6 +12,7 @@ use serenity::all::Member;
 use serenity::all::Message;
 use serenity::all::MessageBuilder;
 use serenity::all::PartialChannel;
+use serenity::all::Role;
 use serenity::all::UserId;
 use serenity::futures::StreamExt;
 use crate::POLL_OPTS;
@@ -458,10 +459,11 @@ pub async fn compare_channel_members_to_poll_and_respond(
     g_id: GuildId, 
     comp_type: UserComparison,
     comp_option: Option<usize>,
+    limit_to_role: Option<&Role>,
 ) {
     // get all non-bot users from the channel
     //let non_bots_vec: Vec<Member> = match get_members_from_channelid_cached(ctx, &ci.channel_id, &g_id) {
-    let non_bots_vec: Vec<Member> = match get_members_from_channelid(ctx, &ci.channel_id).await {
+    let mut non_bots_vec: Vec<Member> = match get_members_from_channelid(ctx, &ci.channel_id).await {
         Ok(mv) => mv.into_iter()
                                 .filter(|m| m.user.bot==false)
                                 .collect(),
@@ -513,6 +515,10 @@ pub async fn compare_channel_members_to_poll_and_respond(
         }
     }
 
+    //role filtering
+    if let Some(role) = limit_to_role {
+        non_bots_vec.retain(|m| m.roles.contains(&role.id)); //might be a bit slow
+    }
     
     // do a comparison
     match comp_type {
