@@ -585,7 +585,7 @@ pub async fn compare_channel_members_to_poll_and_respond(
                                 react,
                                 not_in_voice.len(),
                                 reacted_n),
-                            &members_reacted,
+                            &not_in_voice,
                             ci).await;
                     }
                 },
